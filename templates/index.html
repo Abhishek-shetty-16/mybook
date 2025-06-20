@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Book Management System</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    .container { max-width: 950px; margin-top: 40px; }
+    textarea, input { resize: none; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2 class="mb-4 text-center">📚 Book Management System</h2>
+
+    <!-- Add Book Form -->
+    <form id="bookForm" class="mb-5">
+      <div class="row g-3">
+        <div class="col-md-6">
+          <input type="text" class="form-control" id="title" placeholder="Title" required />
+        </div>
+        <div class="col-md-6">
+          <input type="text" class="form-control" id="author" placeholder="Author" required />
+        </div>
+        <div class="col-md-6">
+          <input type="text" class="form-control" id="isbn" placeholder="ISBN (4-5 characters)" required />
+        </div>
+        <div class="col-md-6">
+          <textarea class="form-control" id="description" rows="1" placeholder="Description"></textarea>
+        </div>
+      </div>
+      <button type="submit" class="btn btn-primary mt-3">Add Book</button>
+    </form>
+
+    <!-- Book Table -->
+    <table class="table table-bordered table-striped">
+      <thead class="table-dark">
+        <tr>
+          <th>ID</th><th>Title</th><th>Author</th><th>ISBN</th><th>Description</th><th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="bookList"></tbody>
+    </table>
+  </div>
+
+  <script>
+    const apiUrl = "http://127.0.0.1:8000/books";
+
+    const fetchBooks = async () => {
+      const res = await fetch(apiUrl);
+      const books = await res.json();
+      const list = document.getElementById("bookList");
+      list.innerHTML = "";
+
+      books.forEach(book => {
+        list.innerHTML += `
+          <tr id="row-${book.id}">
+            <td>${book.id}</td>
+            <td><input class="form-control" id="title-${book.id}" value="${book.title}"></td>
+            <td><input class="form-control" id="author-${book.id}" value="${book.author}"></td>
+            <td><input class="form-control" id="isbn-${book.id}" value="${book.isbn}"></td>
+            <td><input class="form-control" id="desc-${book.id}" value="${book.description || ''}"></td>
+            <td>
+              <button class="btn btn-success btn-sm" onclick="updateBook(${book.id})">Update</button>
+              <button class="btn btn-danger btn-sm" onclick="deleteBook(${book.id})">Delete</button>
+            </td>
+          </tr>`;
+      });
+    };
+
+    document.getElementById("bookForm").addEventListener("submit", async e => {
+      e.preventDefault();
+      const book = {
+        title: document.getElementById("title").value,
+        author: document.getElementById("author").value,
+        isbn: document.getElementById("isbn").value,
+        description: document.getElementById("description").value
+      };
+
+      await fetch(apiUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(book)
+      });
+
+      e.target.reset();
+      fetchBooks();
+    });
+
+    const updateBook = async (id) => {
+  const title = document.getElementById(`title-${id}`).value;
+  const author = document.getElementById(`author-${id}`).value;
+  const isbn = document.getElementById(`isbn-${id}`).value;
+  const description = document.getElementById(`desc-${id}`).value;
+
+  await fetch(`http://127.0.0.1:8000/books/${id}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      title,
+      author,
+      isbn,
+      description
+    })
+  });
+
+  fetchBooks(); // Refresh table
+};
+
+
+    const deleteBook = async (id) => {
+      await fetch(`${apiUrl}/${id}`, {
+        method: "DELETE"
+      });
+
+      fetchBooks();
+    };
+
+    // Load books on page load
+    fetchBooks();
+  </script>
+</body>
+</html>
