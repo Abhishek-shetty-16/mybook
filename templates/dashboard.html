@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Dashboard - Book Management</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <h2>Welcome, {{ user.username }}</h2>
+
+
+    <a href="/logout"><button>Logout</button></a>
+
+    <h3>Add New Book</h3>
+    <form action="/add" method="post">
+        <input type="text" name="title" placeholder="Title" required>
+        <input type="text" name="author" placeholder="Author" required>
+        <input type="text" name="isbn" placeholder="ISBN" required>
+        <textarea name="description" placeholder="Description"></textarea>
+        <button type="submit">Add Book</button>
+    </form>
+
+    <h3>Your Books</h3>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Title</th>
+                <th>Author</th>
+                <th>ISBN</th>
+                <th>Description</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for book in books %}
+            <tr>
+                <td>{{ book.title }}</td>
+                <td>{{ book.author }}</td>
+                <td>{{ book.isbn }}</td>
+                <td>{{ book.description }}</td>
+                <td>
+                    <a href="/update/{{ book.id }}"><button class="edit-btn">Edit</button></a>
+                    <a href="/delete/{{ book.id }}"><button class="delete-btn">Delete</button></a>
+                </td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="5" style="text-align: center;">No books found.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</body>
+</html>

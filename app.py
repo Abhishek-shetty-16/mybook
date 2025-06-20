@@ -1,130 +1,155 @@
-from fastapi import FastAPI,HTTPException,Depends
-import uvicorn
-from pydantic import BaseModel
-from typing import Optional,List
-from sqlmodel import Field,SQLModel,Session,create_engine,select
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, Request, Form, Depends
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi import Request
+from sqlmodel import SQLModel, Session, create_engine, select
+from models import User, Book
+from passlib.hash import bcrypt
+from starlette.middleware.sessions import SessionMiddleware
+from starlette.status import HTTP_303_SEE_OTHER
+from fastapi.staticfiles import StaticFiles
 
 
-#pydantic model,sql model
-class BookBase(SQLModel):
-    title:str=Field(index=True)
-    author:str
-    isbn:str=Field(min_length=4,max_length=5,default="0011")
-    description:Optional[str]
+app = FastAPI()
 
-class Book(BookBase,table=True):
-    id:Optional[int]=Field(default=None,primary_key=True)
+# Session middleware
+app.add_middleware(SessionMiddleware, secret_key="your_secret_key")
 
-class BookUpdate(SQLModel):
-    title: Optional[str]
-    author: Optional[str]
-    isbn: Optional[str]
-    description: Optional[str]
+# Database setup
+sqlite_file_name = "database.db"
+engine = create_engine(f"sqlite:///{sqlite_file_name}", echo=True)
 
-
-#serialzation and validation
-#class Book(BaseModel):
- #   author:str
- #   isbn:str
- #   description:str
-
-  #  class Config:
-    #    orm_mode=True
-
-#database
-#Base=declarative_base()
-#class BookModel(Base):
- #   __tablename__="books"
-  #  id=sqlalchemy.Column(sqlalchemy.Integer, primary_key=True,index=True)
-  #  title=sqlalchemy.Column(sqlalchemy.String,index=True)
-  #  author=sqlalchemy.Column(sqlalchemy.String,index=True)
-  #  description=sqlalchemy.Column(sqlalchemy.String,index=True)
-
-sqlite_url="sqlite:///books.db"
-connect_args={"check_same_thread":False}
-engine=create_engine(sqlite_url,echo=True,connect_args=connect_args)
-
-def create_db_and_table():
+# Create tables
+def create_db():
     SQLModel.metadata.create_all(engine)
 
+create_db()
+
+# Mount static and templates
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+templates = Jinja2Templates(directory="templates")
+
+# Dependency
 def get_session():
     with Session(engine) as session:
         yield session
 
-app = FastAPI()
+# Routes
+
+@app.get("/", response_class=RedirectResponse)
+def home():
+    return RedirectResponse("/login", status_code=HTTP_303_SEE_OTHER)
+
+@app.get("/signup", response_class=HTMLResponse)
+def signup_form(request: Request):
+    return templates.TemplateResponse("signup.html", {"request": request})
+
+@app.post("/signup")
+def signup(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    session: Session = Depends(get_session)
+):
+    existing_user = session.exec(select(User).where(User.username == username)).first()
+    if existing_user:
+        return templates.TemplateResponse("signup.html", {"request": request, "message": "Username already exists!"})
+    
+    user = User(username=username, password=bcrypt.hash(password))
+    session.add(user)
+    session.commit()
+    return RedirectResponse("/login", status_code=HTTP_303_SEE_OTHER)
+
+@app.get("/login", response_class=HTMLResponse)
+def login_form(request: Request):
+    return templates.TemplateResponse("login.html", {"request": request})
+
+@app.post("/login")
+def login(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    session: Session = Depends(get_session)
+):
+    user = session.exec(select(User).where(User.username == username)).first()
+    if not user or not bcrypt.verify(password, user.password):
+        return templates.TemplateResponse("login.html", {"request": request, "message": "Invalid credentials!"})
+
+    request.session['user'] = username
+    return RedirectResponse("/dashboard", status_code=HTTP_303_SEE_OTHER)
+
+@app.get("/logout")
+def logout(request: Request):
+    request.session.clear()
+    return RedirectResponse("/login", status_code=HTTP_303_SEE_OTHER)
+
+@app.get("/dashboard", response_class=HTMLResponse)
+def dashboard(request: Request, session: Session = Depends(get_session)):
+    user = request.session.get("user")
+    if not user:
+        return RedirectResponse("/login", status_code=303)
+    books = session.exec(select(Book).where(Book.owner == user)).all()
+    return templates.TemplateResponse("dashboard.html", {"request": request, "books": books, "user": {"username": user}})
 
 
-app.mount("/static", StaticFiles(directory="static"), name="static")
-templates = Jinja2Templates(directory="templates")
+@app.post("/add")
+def add_book(
+    request: Request,
+    title: str = Form(...),
+    author: str = Form(...),
+    isbn: str = Form(...),
+    description: str = Form(""),
+    session: Session = Depends(get_session)
+):
+    user = request.session.get("user")
+    if not user:
+        return RedirectResponse("/login", status_code=HTTP_303_SEE_OTHER)
 
-@app.on_event("startup")
-def on_startup():
-    create_db_and_table()
-
-@app.get("/", response_class=HTMLResponse)
-def home_page(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
-
-
-
-@app.post("/books")
-@app.post("/books", response_model=Book)
-def create_book(book: Book, session: Session = Depends(get_session)):
+    book = Book(title=title, author=author, isbn=isbn, description=description, owner=user)
     session.add(book)
     session.commit()
-    session.refresh(book)
-    return book
+    return RedirectResponse("/dashboard", status_code=HTTP_303_SEE_OTHER)
 
-@app.get("/books",response_model=List[Book])
-def read_books():
-    with Session(engine) as session:
-        books=session.exec(select(Book)).all()
-        return books
+@app.get("/delete/{book_id}")
+def delete_book(book_id: int, request: Request, session: Session = Depends(get_session)):
+    user = request.session.get("user")
+    if not user:
+        return RedirectResponse("/login", status_code=HTTP_303_SEE_OTHER)
 
-@app.get("/books/{book_id}",response_model=Book)
-def read_book(book_id: int,session:Session=Depends(get_session)):
-    #SELECT * FROM table WHERE book.id==?
-    book_item=session.get(Book,book_id)
-    if not book_item:
-        raise HTTPException(status_code=404,detail="Book not found")
-    return book_item
+    book = session.get(Book, book_id)
+    if book and book.owner == user:
+        session.delete(book)
+        session.commit()
+    return RedirectResponse("/dashboard", status_code=HTTP_303_SEE_OTHER)
 
+@app.get("/update/{book_id}", response_class=HTMLResponse)
+def update_form(book_id: int, request: Request, session: Session = Depends(get_session)):
+    user = request.session.get("user")
+    book = session.get(Book, book_id)
+    if not book or book.owner != user:
+        return RedirectResponse("/dashboard", status_code=HTTP_303_SEE_OTHER)
+    return templates.TemplateResponse("update.html", {"request": request, "book": book})
 
-@app.patch("/books/{book_id}", response_model=Book)
-def update_book(book_id: int, book: BookUpdate, session: Session = Depends(get_session)):
+@app.post("/update/{book_id}")
+def update_book(
+    book_id: int,
+    request: Request,
+    title: str = Form(...),
+    author: str = Form(...),
+    isbn: str = Form(...),
+    description: str = Form(""),
+    session: Session = Depends(get_session)
+):
+    user = request.session.get("user")
+    book = session.get(Book, book_id)
+    if not book or book.owner != user:
+        return RedirectResponse("/dashboard", status_code=HTTP_303_SEE_OTHER)
 
-    book_item=session.get(Book,book_id)
-    if not book_item:
-        raise HTTPException(status_code=404,detail="Book not found")
-    book_data=book.dict(exclude_unset=True)
-    for key,value in book_data.items():
-        setattr(book_item,key,value)
-    session.add(book_item)
+    book.title = title
+    book.author = author
+    book.isbn = isbn
+    book.description = description
+    session.add(book)
     session.commit()
-    session.refresh(book_item)
-    return book_item
-
-@app.delete("/books/{book_id}")
-def delete_book(book_id:int,session:Session=Depends(get_session)):
-    book_item=session.get(Book,book_id)
-    if not book_item:
-        raise HTTPException(status_code=404,detail="Book not found")
-    session.delete(book_item)
-    session.commit()
-    return{"ok":True}
-
-from fastapi.middleware.cors import CORSMiddleware
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Change to specific origins in production
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-    
+    return RedirectResponse("/dashboard", status_code=HTTP_303_SEE_OTHER)
