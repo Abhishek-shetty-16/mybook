@@ -7,40 +7,36 @@ from models import User, Book
 from passlib.hash import bcrypt
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.status import HTTP_303_SEE_OTHER
-from fastapi.staticfiles import StaticFiles
-
 
 app = FastAPI()
 
-# Session middleware
-app.add_middleware(SessionMiddleware, secret_key="your_secret_key")
+# 🔒 Use a strong secret key in production
+app.add_middleware(SessionMiddleware, secret_key="a_super_secure_and_long_secret_key")
 
-# Database setup
+# 📦 SQLite Database setup
 sqlite_file_name = "database.db"
 engine = create_engine(f"sqlite:///{sqlite_file_name}", echo=True)
 
-# Create tables
 def create_db():
     SQLModel.metadata.create_all(engine)
 
 create_db()
 
-# Mount static and templates
+# 📁 Static and template directories
 app.mount("/static", StaticFiles(directory="static"), name="static")
-
 templates = Jinja2Templates(directory="templates")
 
-# Dependency
+# 🔁 Dependency
 def get_session():
     with Session(engine) as session:
         yield session
 
-# Routes
-
+# 🏠 Home redirects to login
 @app.get("/", response_class=RedirectResponse)
 def home():
     return RedirectResponse("/login", status_code=HTTP_303_SEE_OTHER)
 
+# 📝 Signup
 @app.get("/signup", response_class=HTMLResponse)
 def signup_form(request: Request):
     return templates.TemplateResponse("signup.html", {"request": request})
@@ -56,11 +52,13 @@ def signup(
     if existing_user:
         return templates.TemplateResponse("signup.html", {"request": request, "message": "Username already exists!"})
     
-    user = User(username=username, password=bcrypt.hash(password))
+    hashed_password = bcrypt.hash(password)
+    user = User(username=username, password=hashed_password)
     session.add(user)
     session.commit()
     return RedirectResponse("/login", status_code=HTTP_303_SEE_OTHER)
 
+# 🔐 Login
 @app.get("/login", response_class=HTMLResponse)
 def login_form(request: Request):
     return templates.TemplateResponse("login.html", {"request": request})
@@ -79,20 +77,22 @@ def login(
     request.session['user'] = username
     return RedirectResponse("/dashboard", status_code=HTTP_303_SEE_OTHER)
 
+# 🚪 Logout
 @app.get("/logout")
 def logout(request: Request):
     request.session.clear()
     return RedirectResponse("/login", status_code=HTTP_303_SEE_OTHER)
 
+# 📚 Dashboard
 @app.get("/dashboard", response_class=HTMLResponse)
 def dashboard(request: Request, session: Session = Depends(get_session)):
     user = request.session.get("user")
     if not user:
-        return RedirectResponse("/login", status_code=303)
+        return RedirectResponse("/login", status_code=HTTP_303_SEE_OTHER)
     books = session.exec(select(Book).where(Book.owner == user)).all()
     return templates.TemplateResponse("dashboard.html", {"request": request, "books": books, "user": {"username": user}})
 
-
+# ➕ Add Book
 @app.post("/add")
 def add_book(
     request: Request,
@@ -111,6 +111,7 @@ def add_book(
     session.commit()
     return RedirectResponse("/dashboard", status_code=HTTP_303_SEE_OTHER)
 
+# ❌ Delete Book
 @app.get("/delete/{book_id}")
 def delete_book(book_id: int, request: Request, session: Session = Depends(get_session)):
     user = request.session.get("user")
@@ -123,6 +124,7 @@ def delete_book(book_id: int, request: Request, session: Session = Depends(get_s
         session.commit()
     return RedirectResponse("/dashboard", status_code=HTTP_303_SEE_OTHER)
 
+# ✏️ Update Book
 @app.get("/update/{book_id}", response_class=HTMLResponse)
 def update_form(book_id: int, request: Request, session: Session = Depends(get_session)):
     user = request.session.get("user")
